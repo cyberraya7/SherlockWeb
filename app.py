@@ -3,6 +3,7 @@ import requests
 import pandas as pd
 import os
 import io
+import xlsxwriter
 
 # Utility functions
 def interpolate_string(input_string, username):
