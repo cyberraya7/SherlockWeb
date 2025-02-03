@@ -42,7 +42,7 @@ def check_username(username, site_data, timeout=60):
             else:
                 results.append((site, url, "Not Found"))
         else:
-            results.append((site, url, f"Error: {error}"))
+            results.append((site, url, f"Not Found"))
 
     return results
 
