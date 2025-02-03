@@ -2,59 +2,51 @@ import streamlit as st
 import requests
 import pandas as pd
 import os
-from time import monotonic
-from json import loads as json_loads
-from typing import Optional
+import io
 
 # Utility functions
-def interpolate_string(input_object, username):
-    if isinstance(input_object, str):
-        return input_object.replace("{}", username)
-    elif isinstance(input_object, dict):
-        return {k: interpolate_string(v, username) for k, v in input_object.items()}
-    elif isinstance(input_object, list):
-        return [interpolate_string(i, username) for i in input_object]
-    return input_object
+def interpolate_string(input_string, username):
+    """Replaces placeholders in URLs with the given username."""
+    return input_string.replace("{}", username)
 
-def get_response(url, headers, timeout):
+def get_response(url, headers, timeout=10):
+    """Performs a GET request and handles exceptions."""
     try:
         response = requests.get(url, headers=headers, timeout=timeout)
         response.raise_for_status()
-        return response, None
+        return response.status_code, None
     except requests.exceptions.RequestException as e:
         return None, str(e)
 
-def check_username(username, site_data, timeout=60):
+def check_username(username, site_data):
+    """Checks if the username exists on various platforms."""
     results = []
-
     headers = {
         "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:129.0) Gecko/20100101 Firefox/129.0",
     }
 
     for site, info in site_data.items():
         url = interpolate_string(info['url'], username)
+        status_code, error = get_response(url, headers)
 
-        response, error = get_response(url, headers, timeout)
-
-        if response:
-            if response.status_code == 200:
-                results.append((site, url, "Found"))
-            else:
-                results.append((site, url, "Not Found"))
+        if status_code == 200:
+            results.append((f'<a href="{url}" target="_blank">{site}</a>', "Found"))
+        elif status_code == 404:
+            results.append((f'<a href="{url}" target="_blank">{site}</a>', "Not Found"))
         else:
-            results.append((site, url, f"Not Found"))
+            results.append((f'<a href="{url}" target="_blank">{site}</a>', "Not Found"))
 
     return results
 
 # Streamlit application
-st.title("Usernames Across Social Networks")
+st.title("Username Availability Checker")
 
 # Input for username
 username = st.text_input("Enter the username to search for:")
 
 # Predefined site data
 site_data = {
-    "GitHub": {"url": "https://github.com/{}"},
+        "GitHub": {"url": "https://github.com/{}"},
     "Twitter": {"url": "https://twitter.com/{}"},
     "Instagram": {"url": "https://www.instagram.com/{}/"},
     "Facebook": {"url": "https://www.facebook.com/{}/"},
@@ -98,33 +90,45 @@ if st.button("Search"):
         st.error("Please enter a username to search for.")
     else:
         try:
-            # Perform username check
             with st.spinner("Searching for usernames..."):
                 results = check_username(username, site_data)
 
-            # Display results
-            if results:
+            # Convert results to DataFrame (only Profile Link & Status)
+            df = pd.DataFrame(results, columns=["Profile Link", "Status"])
+
+            if not df.empty:
                 st.success("Search completed!")
 
-                # Convert results to DataFrame
-                df = pd.DataFrame(results, columns=["Site", "URL", "Status"])
+                # Create an HTML table with hyperlinks
+                html_table = df.to_html(escape=False, index=False)
+                st.markdown(html_table, unsafe_allow_html=True)
 
-                # Display table
-                st.dataframe(df)
+                # Provide CSV download
+                csv = df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    "Download CSV",
+                    data=csv,
+                    file_name=f"{username}_results.csv",
+                    mime="text/csv"
+                )
 
-                # Provide download options
-                csv = df.to_csv(index=False)
-                st.download_button("Download CSV", data=csv, file_name=f"{username}_results.csv", mime="text/csv")
+                # Provide Excel download (in-memory)
+                excel_buffer = io.BytesIO()
+                with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
+                    df.to_excel(writer, index=False)
+                excel_data = excel_buffer.getvalue()
 
-                excel_path = f"{username}_results.xlsx"
-                df.to_excel(excel_path, index=False)
-                with open(excel_path, "rb") as excel_file:
-                    st.download_button("Download Excel", data=excel_file, file_name=f"{username}_results.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-                os.remove(excel_path)
+                st.download_button(
+                    "Download Excel",
+                    data=excel_data,
+                    file_name=f"{username}_results.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
 
             else:
                 st.warning("No results found.")
 
         except Exception as e:
             st.error(f"An error occurred: {e}")
-st.caption("Powered by Eclogic ")
+
+st.caption("Powered by Eclogic")
